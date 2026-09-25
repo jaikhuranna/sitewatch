@@ -1,0 +1,32 @@
+{
+  "host": "0.0.0.0",
+  "port": 8478,
+  "auth_token": "change-me-to-a-long-random-string",
+  "ntfy_topic": null,
+  "user_agent": "sitewatch/0.1 (+personal monitor)",
+  "notify_file": "notifications.txt",
+  "filter": {
+    "include": [],
+    "exclude": []
+  },
+  "watchers": [
+    {
+      "name": "drivex-assured-blr",
+      "url": "https://www.drivex.in/buy-used-assured-bikes-in-bangalore",
+      "interval": 1800,
+      "items": {
+        "title": "p[class*='max-w-[220px]']",
+        "detail": "p[class*='text-neutral300'], p[class*='text-[18px]'][class*='text-neutral900']"
+      },
+      "include": ["duke", "\\br15(\\b|m)", "apache rtr 200", "yezdi", "himalayan", "classic 350"]
+    },
+    {
+      "name": "demo-local",
+      "url": "http://127.0.0.1:8478/demo-page",
+      "interval": 10,
+      "selector": "body",
+      "mode": "contains",
+      "keywords": ["TRIGGER-WORD"]
+    }
+  ]
+}

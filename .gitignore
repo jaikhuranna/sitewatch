@@ -1,0 +1,6 @@
+/sitewatch
+secrets.json
+state.json
+state.tmp
+events.jsonl
+notifications.txt

@@ -1,0 +1,8 @@
+{
+  "name": "sitewatch",
+  "short_name": "sitewatch",
+  "display": "standalone",
+  "start_url": "/",
+  "background_color": "#0e0e0e",
+  "theme_color": "#2d5a2d"
+}

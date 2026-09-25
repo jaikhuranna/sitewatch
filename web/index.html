@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sitewatch</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#2d5a2d">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0e0e0e; color: #e0e0e0; font: 16px/1.4 system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+           border-bottom: 1px solid #222; position: sticky; top: 0; background: #0e0e0e; }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: 1px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #f33; }
+  .dot.up { background: #3c3; }
+  header button, .wrow button { background: #1a1a1a; color: #9c9; border: 1px solid #2d5a2d;
+                                border-radius: 6px; padding: 4px 10px; }
+  header button { margin-left: auto; }
+  main { padding: 12px 16px 40px; max-width: 640px; margin: 0 auto; }
+  h2 { font-size: 13px; text-transform: uppercase; color: #777; margin: 20px 0 8px; }
+  .card { background: #161616; border: 1px solid #222; border-radius: 8px;
+          padding: 10px 12px; margin-bottom: 8px; }
+  .card.flash { animation: flash 2s ease-out; }
+  @keyframes flash { from { background: #2d5a2d; } to { background: #161616; } }
+  .meta { display: flex; justify-content: space-between; color: #888; font-size: 12px; }
+  .name { color: #9c9; font-weight: 600; }
+  .detail { margin: 4px 0; }
+  details summary { cursor: pointer; color: #666; font-size: 12px; }
+  pre { margin: 6px 0 0; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap;
+        word-break: break-word; color: #bbb; }
+  .wrow { display: flex; align-items: center; gap: 8px; }
+  .wrow .info { flex: 1; min-width: 0; }
+  .wrow.down { border-color: #522; background: #1a1212; }
+  .status-ok { color: #3c3; }
+  .status-triggered { color: #fc3; }
+  .status-fetch_error, .status-selector_missing, .status-config_error { color: #f66; }
+  #health { display: flex; align-items: center; gap: 10px; margin: 20px 0 8px; }
+  #health h2 { margin: 0; }
+  #health-count { font-size: 12px; color: #888; }
+  #health-count.bad { color: #f66; }
+  #recheck-down { display: none; background: #1a1a1a; color: #f99; border: 1px solid #522;
+                  border-radius: 6px; padding: 3px 9px; font-size: 12px; margin-left: auto; }
+  #auth { max-width: 360px; margin: 20vh auto; text-align: center; }
+  #auth input { width: 100%; padding: 10px; background: #161616; color: #eee;
+                border: 1px solid #333; border-radius: 6px; margin: 10px 0; }
+  #auth button { width: 100%; padding: 10px; background: #2d5a2d; color: #fff;
+                 border: 0; border-radius: 6px; }
+  footer { text-align: center; color: #555; font-size: 12px; padding: 16px; }
+  .muted { color: #777; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="auth" hidden>
+  <h1>sitewatch</h1>
+  <input id="token" type="password" placeholder="sitewatch token" autocomplete="current-password">
+  <button id="save">save</button>
+</div>
+<div id="app" hidden>
+  <header>
+    <h1>sitewatch</h1>
+    <span id="dot" class="dot"></span>
+    <button id="notify">notify</button>
+  </header>
+  <main>
+    <h2>events</h2>
+    <div id="events"></div>
+    <div id="health">
+      <h2>watchers</h2>
+      <span id="health-count" class="muted"></span>
+      <button id="recheck-down">recheck all down</button>
+    </div>
+    <div id="watchers"></div>
+  </main>
+  <footer>pull to refresh not required — polling every 15s</footer>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+let token = localStorage.getItem("sitewatch_token") || "";
+let seen = null; // Set of event keys; null until first successful load (no flash/notify then)
+
+function applyAuth() {
+  $("#auth").hidden = !!token;
+  $("#app").hidden = !token;
+}
+applyAuth();
+
+$("#save").onclick = () => {
+  token = $("#token").value.trim();
+  if (!token) return;
+  localStorage.setItem("sitewatch_token", token);
+  applyAuth();
+  poll();
+};
+$("#token").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#save").click(); });
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { ...opts.headers, Authorization: "Bearer " + token } });
+  if (res.status === 401) {
+    token = "";
+    localStorage.removeItem("sitewatch_token");
+    applyAuth();
+    throw new Error("unauthorized");
+  }
+  return res.json();
+}
+
+function rel(ts) {
+  if (!ts) return "never";
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  const [v, u] = s < 60 ? [s, "s"] : s < 3600 ? [s / 60, "m"] : s < 86400 ? [s / 3600, "h"] : [s / 86400, "d"];
+  return Math.floor(v) + u + " ago";
+}
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function eventCard(e, flash) {
+  const card = el("div", "card" + (flash ? " flash" : ""));
+  const meta = el("div", "meta");
+  meta.append(el("span", "name", e.watcher), el("span", "", rel(e.ts)));
+  card.append(meta, el("div", "detail", e.detail));
+  if (e.excerpt) {
+    if (e.excerpt.length > 120) {
+      const d = el("details");
+      d.append(el("summary", "", "excerpt"), el("pre", "", e.excerpt));
+      card.append(d);
+    } else {
+      card.append(el("pre", "", e.excerpt));
+    }
+  }
+  return card;
+}
+
+function announce(e) {
+  if ("Notification" in window && Notification.permission === "granted") {
+    new Notification("sitewatch: " + e.watcher, { body: e.detail });
+  }
+  if (navigator.vibrate) navigator.vibrate(200);
+}
+
+async function poll() {
+  if (!token || document.visibilityState !== "visible") return;
+  try {
+    const events = await api("/api/events?limit=50");
+    $("#dot").classList.add("up");
+    const key = (e) => e.ts + "|" + e.watcher + "|" + e.detail;
+    const fresh = seen ? events.filter((e) => !seen.has(key(e))) : [];
+    if (!seen) {
+      $("#events").replaceChildren(...events.map((e) => eventCard(e, false)));
+    } else if (fresh.length) {
+      for (const e of [...fresh].reverse()) $("#events").prepend(eventCard(e, true));
+      fresh.forEach(announce);
+    }
+    seen = new Set(events.map(key));
+
+    const st = await api("/api/status");
+    const isDown = (s) => s.last_status && s.last_status !== "ok" && s.last_status !== "triggered";
+    const names = Object.keys(st.watchers).sort((a, b) => {
+      const da = isDown(st.watchers[a]), db = isDown(st.watchers[b]);
+      return da !== db ? (da ? -1 : 1) : a.localeCompare(b);
+    });
+    const downNames = names.filter((n) => isDown(st.watchers[n]));
+
+    const rows = names.map((name) => {
+      const s = st.watchers[name];
+      const down = isDown(s);
+      const row = el("div", "card wrow" + (down ? " down" : ""));
+      const info = el("div", "info");
+      info.append(el("div", "name", name),
+                  el("div", "muted", `mode: ${s.mode || "?"} · interval: ${s.interval || "?"}s`),
+                  el("div", "muted status-" + s.last_status,
+                     `${s.last_status} · checked ${rel(s.last_check)}`));
+      const btn = el("button", "", "check now");
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          await api("/api/check/" + encodeURIComponent(name), { method: "POST" });
+          await poll();
+        } finally {
+          btn.disabled = false;
+        }
+      };
+      row.append(info, btn);
+      return row;
+    });
+    $("#watchers").replaceChildren(...rows);
+
+    const countEl = $("#health-count");
+    countEl.textContent = `${names.length - downNames.length}/${names.length} up`;
+    countEl.classList.toggle("bad", downNames.length > 0);
+    const recheckBtn = $("#recheck-down");
+    recheckBtn.style.display = downNames.length > 0 ? "" : "none";
+    recheckBtn.textContent = `recheck ${downNames.length} down`;
+    recheckBtn.onclick = async () => {
+      recheckBtn.disabled = true;
+      try {
+        await Promise.all(downNames.map((n) => api("/api/check/" + encodeURIComponent(n), { method: "POST" })));
+        await poll();
+      } finally {
+        recheckBtn.disabled = false;
+      }
+    };
+  } catch (err) {
+    if (err.message !== "unauthorized") $("#dot").classList.remove("up");
+  }
+}
+
+$("#notify").onclick = () => { if ("Notification" in window) Notification.requestPermission(); };
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");
+
+poll();
+setInterval(poll, 15000);
+</script>
+</body>
+</html>

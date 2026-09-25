@@ -1,0 +1,16 @@
+# systemd user service. Edit the two paths, then see README "Run it permanently".
+[Unit]
+Description=sitewatch: website and listings watcher
+StartLimitIntervalSec=0
+
+[Service]
+WorkingDirectory=%h/sitewatch
+ExecStart=%h/sitewatch/sitewatch -dir %h/sitewatch
+Restart=always
+RestartSec=15
+# stop kills everything in the unit, including any headless Chrome mid-render
+KillMode=control-group
+Nice=5
+
+[Install]
+WantedBy=default.target
